@@ -1,0 +1,128 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["author", "admin"] }
+      },
+      "required": ["uid", "email"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A manuscript project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "authorName": { "type": "string" },
+        "storyline": { "type": "string" },
+        "deadline": { "type": "string", "format": "date-time" },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "archived", "completed"] }
+      },
+      "required": ["title", "authorName", "authorUid", "createdAt", "status"]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "A chapter within a manuscript",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "order": { "type": "number" },
+        "status": { "type": "string", "enum": ["draft", "review", "completed"] },
+        "auditLog": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": { "type": "string", "format": "date-time" },
+              "action": { "type": "string" },
+              "userId": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["projectId", "title", "content", "order", "status"]
+    },
+    "SharedLink": {
+      "title": "Shared Link",
+      "description": "A secure link for sharing a project with a manager or collaborator",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "projectId": { "type": "string" },
+        "role": { "type": "string", "enum": ["viewer", "editor"] },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["token", "projectId", "role", "createdBy"]
+    },
+    "Character": {
+      "title": "Character",
+      "description": "A character profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "motivation": { "type": "string" },
+        "traits": { "type": "array", "items": { "type": "string" } },
+        "linkedChapterIds": { "type": "array", "items": { "type": "string" } },
+        "role": { "type": "string", "enum": ["protagonist", "antagonist", "supporting", "minor"] }
+      },
+      "required": ["projectId", "name", "role"]
+    },
+    "PlotPoint": {
+      "title": "Plot Point",
+      "description": "A key events or story beat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "linkedChapterIds": { "type": "array", "items": { "type": "string" } },
+        "importance": { "type": "string", "enum": ["major", "minor", "twist"] },
+        "order": { "type": "number" }
+      },
+      "required": ["projectId", "title", "importance", "order"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Users collection"
+    },
+    "projects/{projectId}": {
+      "schema": "Project",
+      "description": "Projects collection"
+    },
+    "projects/{projectId}/chapters/{chapterId}": {
+      "schema": "Chapter",
+      "description": "Chapters subcollection"
+    },
+    "projects/{projectId}/characters/{characterId}": {
+      "schema": "Character",
+      "description": "Characters subcollection"
+    },
+    "projects/{projectId}/plotPoints/{plotId}": {
+      "schema": "PlotPoint",
+      "description": "Plot points subcollection"
+    },
+    "sharedLinks/{tokenId}": {
+      "schema": "SharedLink",
+      "description": "Shared links for projects"
+    }
+  }
+}

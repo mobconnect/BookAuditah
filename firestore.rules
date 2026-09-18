@@ -1,0 +1,241 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - uid: string (required)
+//   - email: string (required)
+//   - displayName: string (optional)
+//   - photoURL: string (optional)
+//   - role: string (enum: ['author', 'admin'])
+//
+// Collection: projects
+// Document ID: {projectId}
+// Fields:
+//   - title: string (required, < 100 chars)
+//   - authorName: string (required, < 100 chars)
+//   - storyline: string (optional, < 2000 chars)
+//   - deadline: string (optional, ISO 8601)
+//   - authorUid: string (required, immutable)
+//   - createdAt: timestamp (required, immutable)
+//   - status: string (enum: ['active', 'archived', 'completed'])
+//
+// Collection: projects/{projectId}/chapters
+// Document ID: {chapterId}
+// Fields:
+//   - projectId: string (required, immutable)
+//   - title: string (required, < 100 chars)
+//   - content: string (required, < 1000000 chars - 1MB limit check)
+//   - order: number (required)
+//   - status: string (enum: ['draft', 'review', 'completed'])
+//   - auditLog: list (required, items: {timestamp: timestamp, action: string, userId: string})
+//
+// Collection: sharedLinks
+// Document ID: {tokenId}
+// Fields:
+//   - token: string (required)
+//   - projectId: string (required)
+//   - role: string (enum: ['viewer', 'editor'])
+//   - expiresAt: timestamp (optional)
+//   - createdBy: string (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "jessieleighbright@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isProjectOwner(projectId) {
+      return isAuthenticated() && get(/databases/$(database)/documents/projects/$(projectId)).data.authorUid == request.auth.uid;
+    }
+
+    function getRole(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)/collaborators/$(request.auth.uid)).data.role;
+    }
+
+    function hasProjectAccess(projectId, minRole) {
+      return isAuthenticated() && (
+        isProjectOwner(projectId) || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/projects/$(projectId)/collaborators/$(request.auth.uid)) && (
+          (minRole == 'viewer') ||
+          (minRole == 'editor' && getRole(projectId) in ['editor', 'manager', 'publisher']) ||
+          (minRole == 'artist' && getRole(projectId) in ['artist', 'editor'])
+        ))
+      );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,10}$");
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (data.role == 'author' || data.role == 'admin');
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['title', 'authorName', 'authorUid', 'createdAt', 'status']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             data.authorName is string && data.authorName.size() < 100 &&
+             data.authorUid == request.auth.uid &&
+             data.status in ['active', 'archived', 'completed'] &&
+             (!('storyline' in data) || (data.storyline is string && data.storyline.size() < 2000));
+    }
+
+    function isValidChapter(data) {
+      return data.keys().hasAll(['projectId', 'title', 'content', 'order', 'status', 'auditLog']) &&
+             data.title is string && data.title.size() < 100 &&
+             data.content is string &&
+             data.order is number &&
+             data.status in ['draft', 'review', 'completed'] &&
+             data.auditLog is list;
+    }
+
+    function isValidIllustration(data) {
+      return data.keys().hasAll(['projectId', 'title', 'url', 'artistId', 'artistName', 'status', 'createdAt']) &&
+             data.title is string && data.title.size() < 100 &&
+             data.url is string && data.url.size() < 2048 &&
+             data.artistId is string &&
+             data.status in ['draft', 'under_review', 'final'];
+    }
+
+    function isValidBrainstormNote(data) {
+      return data.keys().hasAll(['projectId', 'content', 'authorId', 'authorName', 'createdAt']) &&
+             data.content is string && data.content.size() < 10000 &&
+             data.authorId is string;
+    }
+
+    function isValidCharacter(data) {
+      return data.keys().hasAll(['projectId', 'name', 'role']) &&
+             data.name is string && data.name.size() < 100 &&
+             data.role in ['protagonist', 'antagonist', 'supporting', 'minor'] &&
+             (!('description' in data) || data.description is string) &&
+             (!('motivation' in data) || data.motivation is string) &&
+             (!('traits' in data) || data.traits is list) &&
+             (!('linkedChapterIds' in data) || data.linkedChapterIds is list);
+    }
+
+    function isValidPlotPoint(data) {
+      return data.keys().hasAll(['projectId', 'title', 'importance', 'order']) &&
+             data.title is string && data.title.size() < 200 &&
+             data.importance in ['major', 'minor', 'twist'] &&
+             data.order is number &&
+             (!('description' in data) || data.description is string) &&
+             (!('linkedChapterIds' in data) || data.linkedChapterIds is list);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    // Support for collectionGroup queries on collaborators
+    match /{path=**}/collaborators/{collabId} {
+      allow read: if isAuthenticated() && (
+        resource.data.email == request.auth.token.email || 
+        isProjectOwner(path[1]) || // project ID is second element in /projects/{projId}/collaborators
+        isAdmin()
+      );
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                      request.resource.data.role == resource.data.role; // Prevent self-escalation
+    }
+
+    match /projects/{projectId} {
+      allow read: if hasProjectAccess(projectId, 'viewer');
+      allow create: if isAuthenticated() && isValidProject(request.resource.data);
+      allow update: if (isProjectOwner(projectId) || isAdmin() || hasProjectAccess(projectId, 'editor')) &&
+                      isValidProject(request.resource.data) &&
+                      request.resource.data.authorUid == resource.data.authorUid &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(resource.data.authorUid) || isAdmin();
+
+      match /chapters/{chapterId} {
+        allow read: if hasProjectAccess(projectId, 'viewer');
+        allow create: if hasProjectAccess(projectId, 'editor') && isValidChapter(request.resource.data);
+        allow update: if hasProjectAccess(projectId, 'editor') &&
+                        isValidChapter(request.resource.data) &&
+                        request.resource.data.projectId == resource.data.projectId;
+        allow delete: if hasProjectAccess(projectId, 'editor');
+      }
+
+      match /illustrations/{illId} {
+        allow read: if hasProjectAccess(projectId, 'viewer');
+        allow create: if hasProjectAccess(projectId, 'artist') && isValidIllustration(request.resource.data);
+        allow update: if hasProjectAccess(projectId, 'artist') && 
+                        isValidIllustration(request.resource.data) &&
+                        request.resource.data.projectId == resource.data.projectId;
+        allow delete: if hasProjectAccess(projectId, 'artist');
+      }
+
+      match /brainstorm/{noteId} {
+        allow read: if hasProjectAccess(projectId, 'viewer');
+        allow create: if hasProjectAccess(projectId, 'viewer') && isValidBrainstormNote(request.resource.data);
+        allow update: if hasProjectAccess(projectId, 'viewer') && 
+                        isValidBrainstormNote(request.resource.data) &&
+                        request.resource.data.authorId == request.auth.uid;
+        allow delete: if hasProjectAccess(projectId, 'viewer') && 
+                        (resource.data.authorId == request.auth.uid || isProjectOwner(projectId));
+      }
+
+      match /characters/{charId} {
+        allow read: if hasProjectAccess(projectId, 'viewer');
+        allow create: if hasProjectAccess(projectId, 'editor') && isValidCharacter(request.resource.data);
+        allow update: if hasProjectAccess(projectId, 'editor') && isValidCharacter(request.resource.data);
+        allow delete: if hasProjectAccess(projectId, 'editor');
+      }
+
+      match /plotPoints/{plotId} {
+        allow read: if hasProjectAccess(projectId, 'viewer');
+        allow create: if hasProjectAccess(projectId, 'editor') && isValidPlotPoint(request.resource.data);
+        allow update: if hasProjectAccess(projectId, 'editor') && isValidPlotPoint(request.resource.data);
+        allow delete: if hasProjectAccess(projectId, 'editor');
+      }
+
+      match /collaborators/{collabId} {
+        allow read: if hasProjectAccess(projectId, 'viewer');
+        allow write: if isProjectOwner(projectId) || isAdmin();
+      }
+    }
+
+    match /sharedLinks/{tokenId} {
+      allow read: if isAuthenticated(); // Any auth user can try to use a link
+      allow create: if isAuthenticated(); // Simplified for now
+      allow delete: if isAuthenticated() && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "BookAudita",
+  "description": "Professional manuscript tracking, AI-powered proofreading, and secure auditing for authors.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
